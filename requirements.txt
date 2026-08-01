@@ -1,0 +1,9 @@
+chromadb>=0.5.5
+docling>=2.9.0
+docling-core>=2.9.0
+langchain-core>=0.3.0
+langchain-ollama>=0.2.0
+langgraph>=0.2.0
+ollama>=0.4.0
+python-dotenv>=1.0.1
+streamlit>=1.37.0
