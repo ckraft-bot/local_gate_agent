@@ -67,6 +67,7 @@ def specialists_node(state: GraphState, settings: Settings, store: LocalVectorSt
 
     findings: Dict[str, str] = {}
     sources: Dict[str, List[str]] = {}
+    evidence_docs: Dict[str, List[str]] = {}
 
     for specialist_key in state["routed_specialists"]:
         specialist = SPECIALISTS[specialist_key]
@@ -74,20 +75,31 @@ def specialists_node(state: GraphState, settings: Settings, store: LocalVectorSt
             query=state["user_query"], specialist_key=specialist_key, store=store, settings=settings
         )
 
-        context = "\n\n".join(docs[: settings.top_k]) if docs else "No retrieved context."
+        # A second retrieval pass gives specialists a chance to refine search scope.
+        refine_query = f"{state['user_query']} {specialist.label} procedures"
+        docs_refined, source_ids_refined = retrieve_for_specialist(
+            query=refine_query, specialist_key=specialist_key, store=store, settings=settings
+        )
+
+        merged_docs = list(dict.fromkeys(docs + docs_refined))
+        merged_source_ids = list(dict.fromkeys(source_ids + source_ids_refined))
+
+        context = "\n\n".join(merged_docs[: settings.top_k]) if merged_docs else "No retrieved context."
         prompt = (
             f"{specialist.system_prompt}\n\n"
             f"User question:\n{state['user_query']}\n\n"
             f"Retrieved context:\n{context}\n\n"
-            "Write a concise domain-specific finding with caveats when context is weak."
+            "Write a brief domain-specific finding with the most relevant details and caveats when context is weak."
         )
         result = llm.invoke([HumanMessage(content=prompt)])
 
         findings[specialist_key] = str(result.content).strip()
-        sources[specialist_key] = source_ids
+        sources[specialist_key] = merged_source_ids
+        evidence_docs[specialist_key] = merged_docs
 
     state["specialist_findings"] = findings
     state["specialist_sources"] = sources
+    state["specialist_evidence_docs"] = evidence_docs
     return state
 
 
@@ -96,7 +108,14 @@ def aggregator_node(state: GraphState) -> GraphState:
     for specialist_key in state["routed_specialists"]:
         finding = state["specialist_findings"].get(specialist_key, "")
         source_ids = state["specialist_sources"].get(specialist_key, [])
-        lines.append(f"[{SPECIALISTS[specialist_key].label}]\n{finding}\nSources: {', '.join(source_ids)}")
+        evidence = state.get("specialist_evidence_docs", {}).get(specialist_key, [])
+        evidence_text = "\n\n".join(evidence[:3])
+        lines.append(
+            f"[{SPECIALISTS[specialist_key].label}]\n"
+            f"Finding: {finding}\n"
+            f"Sources: {', '.join(source_ids)}\n"
+            f"Evidence:\n{evidence_text}"
+        )
 
     state["aggregated_context"] = "\n\n".join(lines)
     return state
@@ -119,7 +138,7 @@ def self_check_node(state: GraphState, settings: Settings) -> GraphState:
     prompt = (
         f"{SELF_CHECK_PROMPT}\n\n"
         f"Question:\n{state['user_query']}\n\n"
-        f"Aggregated context:\n{state['aggregated_context']}\n\n"
+        f"Aggregated context (specialist findings + retrieved evidence):\n{state['aggregated_context']}\n\n"
         f"Draft answer:\n{state['draft_answer']}"
     )
     result = llm.invoke([HumanMessage(content=prompt)])

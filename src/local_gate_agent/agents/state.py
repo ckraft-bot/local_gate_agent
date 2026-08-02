@@ -9,6 +9,7 @@ class GraphState(TypedDict):
     routed_specialists: List[str]
     specialist_findings: Dict[str, str]
     specialist_sources: Dict[str, List[str]]
+    specialist_evidence_docs: Dict[str, List[str]]
     aggregated_context: str
     draft_answer: str
     self_check_feedback: str

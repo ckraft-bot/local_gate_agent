@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import hashlib
+import json
+from urllib import request
 from typing import Dict, Iterable, List, Sequence
 
 import chromadb
-import ollama
-from chromadb.api.models.Collection import Collection
 
 from local_gate_agent.config import Settings
 from local_gate_agent.schemas import ChunkRecord
@@ -19,17 +18,36 @@ class LocalVectorStore:
 
     @staticmethod
     def deterministic_chunk_id(source: str, chunk_index: int, text: str) -> str:
-        seed = f"{source}:{chunk_index}:{text[:120]}".encode("utf-8")
-        digest = hashlib.sha1(seed).hexdigest()
-        return f"{source}:{chunk_index}:{digest[:10]}"
+        _ = text  # Signature kept stable for callers; ID is source+index by design.
+        return f"{source}:{chunk_index}"
+
+    def delete_chunks_for_source(self, source_filename: str) -> None:
+        existing = self.collection.get(where={"source": source_filename}, include=[])
+        ids = existing.get("ids", [])
+        if ids:
+            self.collection.delete(ids=ids)
 
     def _embed_texts(self, texts: Sequence[str]) -> List[List[float]]:
-        response = ollama.embed(
-            model=self.settings.embedding_model,
-            input=list(texts),
-            host=self.settings.ollama_host,
+        payload = json.dumps(
+            {
+                "model": self.settings.embedding_model,
+                "input": list(texts),
+            }
+        ).encode("utf-8")
+        req = request.Request(
+            url=f"{self.settings.ollama_host.rstrip('/')}/api/embed",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
         )
-        return response["embeddings"]
+        with request.urlopen(req, timeout=60) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        if "embeddings" in body:
+            return body["embeddings"]
+        if "embedding" in body:
+            return [body["embedding"]]
+        raise RuntimeError("Ollama /api/embed response missing embeddings field.")
 
     def upsert_chunks(self, chunks: Iterable[ChunkRecord]) -> int:
         chunk_list = list(chunks)

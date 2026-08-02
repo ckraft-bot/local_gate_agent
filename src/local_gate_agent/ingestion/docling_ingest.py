@@ -39,6 +39,9 @@ class DoclingIngestor:
     def ingest_files(self, paths: Iterable[Path]) -> int:
         total = 0
         for path in paths:
+            # Replace old chunks for this source before writing new ones.
+            self.vector_store.delete_chunks_for_source(path.name)
+
             source_metadata = infer_metadata_for_source(path)
             chunk_texts = self._chunk_with_docling(path)
 

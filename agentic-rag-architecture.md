@@ -1,6 +1,6 @@
-# Local Multi-Agent RAG — Architecture & Wiring Plan
+# Virtual Gate Agent — Architecture & Wiring Plan
 
-A fully local, multi-agent RAG chatbot. No cloud dependencies, no API costs.
+A fully local, multi-agent RAG chatbot that acts *as* a gate agent — a customer-facing assistant passengers talk to directly, not an internal lookup tool for employees. No cloud dependencies, no API costs.
 
 **Stack:** Docling (ingestion) → Chroma (vector store) → LangGraph multi-agent system on Ollama (supervisor + domain specialists + synthesizer, with self-check) → Streamlit (UI)
 
@@ -20,24 +20,16 @@ flowchart TD
     subgraph ChatLoop["Multi-Agent Chat Loop (per user turn)"]
         F[User question<br/>Streamlit chat input] --> S[Supervisor Agent<br/>classifies question, routes to 1+ specialists]
 
-        S --> R1[Specialist Agent A<br/>e.g. Regulatory/Operations]
-        S --> R2[Specialist Agent B<br/>e.g. Maintenance]
-        S --> R3[Specialist Agent C<br/>e.g. Airspace/Procedures]
-        S --> R4[Specialist Agent D<br/>e.g. UAS/Drones]
+        S --> R1[Specialist Agent 1<br/>Boarding & Ticketing /<br/>Baggage Check-in & Rebooking]
+        S --> R2[Specialist Agent 2<br/>Baggage & Ramp Coordination]
 
         R1 -->|tool call| T1[Retrieve Tool<br/>Chroma filtered by domain]
         R2 -->|tool call| T2[Retrieve Tool<br/>Chroma filtered by domain]
-        R3 -->|tool call| T3[Retrieve Tool<br/>Chroma filtered by domain]
-        R4 -->|tool call| T4[Retrieve Tool<br/>Chroma filtered by domain]
         T1 --> R1
         T2 --> R2
-        T3 --> R3
-        T4 --> R4
 
         R1 --> AG[Aggregator]
         R2 --> AG
-        R3 --> AG
-        R4 --> AG
 
         AG --> Y[Synthesizer Agent<br/>merges specialist findings,<br/>resolves conflicts, drafts answer]
         Y --> I[Self-Check Node<br/>LLM judges groundedness<br/>vs. all retrieved context]
@@ -48,11 +40,9 @@ flowchart TD
 
     E -.retrieval reads from.-> T1
     E -.retrieval reads from.-> T2
-    E -.retrieval reads from.-> T3
-    E -.retrieval reads from.-> T4
 ```
 
-Only specialists the supervisor actually routes to are invoked for a given question — the diagram shows all four as the general shape, not every query hitting every specialist.
+Both specialists are typically invoked per question given the small set — the supervisor's routing choice matters more once a domain has several specialists competing for a query than it does with just two closely related ones.
 
 ---
 
@@ -88,8 +78,8 @@ Instead of one agent doing everything, responsibility is split across specialize
 | **Supervisor agent** | Reads the user's question and decides which specialist(s) are relevant (one, several, or — for narrow-scope questions — just one). Routes the question to those specialists. Also the re-entry point if self-check fails. |
 | **Specialist agents** (2–4, domain-scoped) | Each is a small retrieve-capable agent focused on one subject area, with its own system prompt and its own `retrieve` tool pre-scoped to that domain's slice of the corpus (via metadata filtering, not a separate vector store). Each can call `retrieve` more than once to refine its query, same as the single-agent version did. |
 | **Aggregator** | Simple merge step — collects each invoked specialist's findings (draft notes + the chunks they retrieved) into one shared state, no LLM call needed. |
-| **Synthesizer agent** | Takes the aggregated specialist findings and produces one coherent final answer — resolving overlaps, flagging disagreement between specialists if it exists, and consolidating citations. |
-| **Self-check node** | Judges whether the synthesized answer is actually supported by the full set of retrieved context across all specialists. If not, and retries remain, routes back to the supervisor with a critique so it can adjust routing or ask a specialist to re-retrieve. Capped at a small max-retries count. |
+| **Synthesizer agent** | Takes the aggregated specialist findings and produces one coherent final answer **in the first-person voice of a gate agent talking to a passenger** — plain language, warm and professional customer-service tone, no internal jargon or raw policy citations dumped on the passenger. Resolves overlaps and consolidates what it can say confidently. |
+| **Self-check node** | Judges whether the synthesized answer is actually supported by the retrieved context. If not, and retries remain, routes back to the supervisor with a critique. If retries are exhausted and the answer still isn't well-grounded, the fallback is **not** a best-guess answer — it's a clear "let me get you to a human agent for this" response (see §7 below). |
 
 **Why multi-agent vs. one agent with one tool:**
 - **Focused prompts beat one generalist prompt.** A specialist scoped to "maintenance guidance" can have a system prompt and retrieval scope tuned to that vocabulary, instead of one prompt trying to cover every domain adequately.
@@ -100,7 +90,7 @@ Instead of one agent doing everything, responsibility is split across specialize
 ### 2.5 Interface: Streamlit
 
 - Standard chat UI: message history, chat input box, streaming/spinner while the agent runs.
-- Displays the final answer, and an expandable "Sources used" section pulled from whichever chunks were retrieved during that turn.
+- Displays the final answer in gate-agent voice. Whether the underlying "sources used" are shown to the passenger is a real design choice, not a default: for a passenger-facing bot, raw source citations (document names, policy numbers) probably don't belong in the main chat bubble — they read as internal jargon. Worth keeping them available in a collapsed/debug view (useful during development and for auditing what the bot grounded its answer in) without surfacing them in the passenger-facing conversation by default.
 - Sidebar for setup checklist and a "clear conversation" control to reset session state.
 - Runs as a single local web app — no external hosting required.
 
@@ -167,13 +157,15 @@ Streamlit chat input
 
 ---
 
-## 6. Use Case: Gate Agent Training Assistant
+## 6. Use Case: Virtual Gate Agent (Passenger-Facing)
 
-**Data source:** Internal gate agent training manuals and materials (boarding procedures, customer service SOPs, irregular operations handling, special assistance policies, etc.) — typically **proprietary/internal airline or airport-operator documents**, not public data like the FAA ACs from the earlier draft of this plan.
+**Data source:** Internal gate agent training manuals and materials (boarding procedures, customer service SOPs, irregular operations handling, special assistance policies, etc.) — typically **proprietary/internal airline or airport-operator documents**.
 
-This changes a few things vs. a public-regulation use case:
+**Who's actually talking to this system matters here.** Earlier drafts of this plan assumed a gate agent employee querying the system to look something up. This version *is* the gate agent from the passenger's point of view — it answers passengers directly, in a customer-service voice, rather than surfacing raw policy text for an employee to interpret. That shifts several things:
 
-- **Confidentiality**: these documents likely shouldn't be treated as freely shareable. Worth tagging metadata with an internal confidentiality/sensitivity level, and being deliberate about who has access to the chat interface itself (this is squarely a case where "fully local, no cloud calls" is a real advantage, not just a cost saver).
+- **Tone**: warm, plain-language, first-person ("I can help you with that" / "Let me check on your bag"), not "per AC 91-79A" style citation-dropping. The Synthesizer agent (§2.4) owns this voice.
+- **Confidence bar is higher**: an employee reading a slightly-off policy excerpt can sanity-check it against experience; a passenger getting a slightly-off answer directly may act on it (miss a rebooking window, board with the wrong document). This is exactly why the self-check node's fallback is "hand off to a human" rather than a best-effort guess (§7).
+- **Confidentiality**: source documents likely shouldn't be treated as freely shareable, even though the bot's *answers* are meant for public/passenger consumption. Worth tagging metadata with an internal confidentiality/sensitivity level, and keeping the underlying manuals themselves access-controlled even though the chat interface is passenger-facing.
 - **Supplementary public regulation**: some of what a gate agent needs traces back to public federal rules that can be ingested alongside the internal manuals for grounding, e.g. [14 CFR Part 250](https://www.ecfr.gov/current/title-14/chapter-II/subchapter-D/part-250) (oversales/denied boarding), [14 CFR Part 382](https://www.ecfr.gov/current/title-14/chapter-II/subchapter-D/part-382) (nondiscrimination on the basis of disability — wheelchair service, service animals), and TSA screening/security procedures relevant to gate operations. Keeping these separate from internal SOPs in metadata (`source_type: internal` vs `source_type: public_regulation`) matters, since internal policy sometimes goes beyond the regulatory floor and the agent shouldn't blur the two when citing.
 - **Document lifecycle**: training manuals get revised (new procedures, updated seasonal policies like holiday travel rules); an `effective_date` / `version` field matters here just as much as it did for AC revisions.
 
@@ -181,13 +173,10 @@ This changes a few things vs. a public-regulation use case:
 
 | Specialist | Covers | Example question it'd handle |
 |---|---|---|
-| **Boarding & Documents** | Boarding procedures, ID/document verification, oversold flights & denied boarding (14 CFR Part 250), gate changes | "What's the process when a flight is oversold at boarding?" |
-| **Special Assistance & Accommodations** | Wheelchair service, service animals, unaccompanied minors, ADA/Part 382 compliance | "What's the procedure for a passenger requesting wheelchair assistance at the gate?" |
-| **Irregular Operations (IROPS)** | Delays, cancellations, misconnections, rebooking, weather holds | "What's the rebooking policy when a flight is cancelled for weather?" |
-| **Safety & Security** | TSA/SIDA badge procedures, security protocols at the gate, basic hazmat awareness | "What are the gate security procedures during a ramp closure?" |
-| **Baggage & Ramp Coordination** | Checked-bag policies, gate-checking carry-ons, communicating with ramp/baggage crews | "When does a carry-on get gate-checked instead of boarded?" |
+| **Boarding & Ticketing and Baggage Check-in & Rebooking** | Boarding procedures, ID/ticket/document verification, oversold flights & denied boarding (14 CFR Part 250), baggage check-in process, rebooking due to delays/cancellations/misconnections | "What's the process when a flight is oversold at check-in?" / "How do I rebook a passenger who missed a connection?" |
+| **Baggage & Ramp Coordination** | Checked-bag handling on the ramp side, gate-checking carry-ons, communicating with ramp/baggage crews, baggage irregularities (damaged/delayed/lost) | "When does a carry-on get gate-checked instead of boarded?" / "What's the process for reporting a damaged checked bag to the ramp crew?" |
 
-Same note as before applies: start with fewer specialists (2–3) if the training material doesn't clearly separate into all five; merge or split based on where questions actually cluster once the assistant is in use.
+Two specialists total — one covers the passenger-facing front-of-house flow (ticketing, boarding, check-in, rebooking), the other covers the operational back-of-house flow (physical baggage handling and ramp coordination). This keeps the split simple: front-of-house vs. back-of-house, rather than splitting by finer procedure type.
 
 ### Additional metadata fields for this use case
 
@@ -195,21 +184,39 @@ Same note as before applies: start with fewer specialists (2–3) if the trainin
 |---|---|
 | `source_type` (`internal` / `public_regulation`) | Keeps proprietary SOPs distinct from cited public rules in answers |
 | `confidentiality` (e.g. `internal_use_only`) | Signals sensitivity; supports access-control decisions outside the RAG system itself |
-| `procedure_category` | Maps to the specialist table above for retrieval filtering |
+| `procedure_category` | Maps to the 2-specialist split above (front-of-house vs. back-of-house) for retrieval filtering |
 | `effective_date` / `version` | Surfaces which revision of a procedure is current, same role AC revision dates played before |
 | `station` / `airline` (if materials cover more than one) | Relevant if training content varies by airport station or carrier |
 
 ### A note on scope
 
-FAA and DOT public regulations (14 CFR Part 250, Part 382, TSA requirements) set a floor, but internal training manuals often add airline- or station-specific procedure on top of that floor. This system is well suited to help a gate agent find and understand the right procedure quickly — it's not a substitute for verifying against the current internal manual or a supervisor's guidance for anything unusual, high-stakes, or where the manual itself seems out of date.
+FAA and DOT public regulations (14 CFR Part 250, Part 382, TSA requirements) set a floor, but internal training manuals often add airline- or station-specific procedure on top of that floor. As a passenger-facing bot, this system should stick to what the manuals actually say and hand off anything it can't ground confidently — see §7 below for exactly where that line should sit.
 
 ---
 
-## 7. Things to Revisit as This Grows
+## 7. Boundaries & Escalation
+
+Because this bot speaks *as* the gate agent rather than *to* one, it needs explicit limits on what it's allowed to answer on its own versus when it hands off to a human. Worth deciding these deliberately rather than letting them fall out of default LLM behavior:
+
+| Situation | Behavior |
+|---|---|
+| Question is answered clearly and confidently by retrieved policy | Answer directly, in gate-agent voice |
+| Self-check flags the answer as unsupported, retries exhausted | Hand off: "Let me get a team member to help you with that" — never a best-guess answer on a passenger-facing policy question |
+| Question requires **real-time data this system doesn't have** (actual flight status, actual seat/gate assignment, actual booking record) | Explicitly out of scope for a RAG-over-manuals system — it only knows *policy and procedure*, not live operational data. Needs a clear "I don't have access to your specific booking" response rather than guessing, and a path to a human or the airline's live systems. |
+| Question implies an **action** (rebook me, refund me, issue a voucher) | RAG alone can explain the policy but can't execute a transaction — that requires integration with real booking/ops systems, which is a separate build from this architecture. Worth deciding early whether this system stays informational-only or grows into a tool-calling agent connected to real backend systems later. |
+| Passenger is upset, escalated, or the situation is sensitive (disability accommodation dispute, denied boarding compensation dispute, etc.) | Route to a human quickly rather than letting the bot attempt de-escalation — customer-service judgment in a charged situation is a different skill than policy lookup. |
+| Passenger shares personal/sensitive information (medical details, PII) | Bot shouldn't retain or repeat this beyond what's needed to answer the immediate question; this system as designed has no durable per-passenger memory, which is the safer default here. |
+
+This table is the honest boundary of what a local RAG system (even a multi-agent one) is good for: **explaining policy accurately**, not **executing transactions** or **replacing human judgment in charged moments**. Keeping that boundary explicit in the system prompts (not just hoped for) is worth treating as a first-class design requirement, not an afterthought.
+
+---
+
+## 8. Things to Revisit as This Grows
 
 - **Model choice**: if the chat model under- or over-triggers retrieval, that's the first thing to swap/tune.
 - **Scale**: Chroma is well-suited to personal/small-team knowledge bases (up to roughly a few million vectors); a migration path to something like Qdrant or pgvector is worth planning for if the corpus grows well beyond that.
 - **Self-check cost**: each self-check adds one extra LLM call per turn — worth an on/off toggle if latency becomes more important than answer verification.
 - **Multi-user / production concerns** (auth, concurrent access, backups) are out of scope for this personal-use architecture and would need to be layered in separately if requirements change.
-- **Specialist count**: start with the fewest specialists that cover distinct domains well (2–3, not necessarily all 4 from §6). Each additional specialist adds routing complexity and per-turn LLM calls — only split further once a single specialist's prompt is visibly straining to cover too much ground.
-- **Routing accuracy**: the supervisor's classification is itself a place errors can creep in (misrouting a maintenance question to Regulatory & Operations, for instance). Worth spot-checking routing decisions early, since a wrong route means the right specialist never even ran.
+- **Specialist count**: currently 2 (front-of-house vs. back-of-house). Each additional specialist adds routing complexity and per-turn LLM calls — only split further (e.g., pulling rebooking/IROPS out on its own) once real usage shows one of these two is straining to cover too much ground.
+- **Routing accuracy**: the supervisor's classification is itself a place errors can creep in (e.g., misrouting a rebooking question to the Baggage & Ramp specialist instead of Boarding & Ticketing). Worth spot-checking routing decisions early, since a wrong route means the right specialist never even ran.
+- **Voice consistency**: with the persona shift to passenger-facing, it's worth periodically checking that the Synthesizer is actually staying in gate-agent voice and not leaking internal document language (policy numbers, internal-only terminology) into passenger-facing answers.
