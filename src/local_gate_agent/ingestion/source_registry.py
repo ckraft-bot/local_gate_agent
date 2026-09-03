@@ -5,6 +5,18 @@ from typing import Dict
 
 
 FILE_METADATA_OVERRIDES: Dict[str, Dict[str, str]] = {
+    "routine_at_gate.md": {
+        "procedure_category": "gate_routine",
+        "source_type": "internal",
+        "confidentiality": "internal_use_only",
+        "version": "1.0",
+    },
+    "routine_at_counter.md": {
+        "procedure_category": "ticket_counter_routine",
+        "source_type": "internal",
+        "confidentiality": "internal_use_only",
+        "version": "1.0",
+    },
     "airport_operation_agent.pdf": {
         "procedure_category": "boarding_documents",
         "source_type": "internal",

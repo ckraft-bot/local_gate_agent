@@ -1,6 +1,10 @@
 SUPERVISOR_PROMPT = """
 You are the supervisor in a local multi-agent RAG system.
 Given a user question, choose relevant specialists from:
+- routine_at_gate: gate preparation, crew check-in, boarding, jetbridge operation, standby,
+  gate upgrades, disruptions, oversales, and load-closeout coordination.
+- routine_at_counter: pre-security check-in, reservations, ticket changes, travel documents,
+  codeshares, checked baggage, fees, and outstation cross-trained work.
 - boarding_documents
 - special_assistance
 - irops

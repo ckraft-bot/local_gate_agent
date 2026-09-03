@@ -17,6 +17,7 @@ class SpecialistDefinition:
     label: str
     procedure_categories: List[str]
     system_prompt: str
+    source_names: List[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,32 @@ class Settings:
 
 
 SPECIALISTS: Dict[str, SpecialistDefinition] = {
+    "routine_at_gate": SpecialistDefinition(
+        key="routine_at_gate",
+        label="Gate Routine",
+        procedure_categories=["gate_routine"],
+        source_names=["routine_at_gate.md"],
+        system_prompt=(
+            "You are the gate-routine specialist. Answer only from the documented gate "
+            "workflow. Cover gate preparation, crew check-in, boarding, standby and upgrades, "
+            "carry-on handling, passenger accommodations, jetbridge operation, disruptions, "
+            "oversales, and load-closeout coordination. State when airline-specific procedures "
+            "or ownership are not established by the source."
+        ),
+    ),
+    "routine_at_counter": SpecialistDefinition(
+        key="routine_at_counter",
+        label="Ticket Counter Routine",
+        procedure_categories=["ticket_counter_routine"],
+        source_names=["routine_at_counter.md"],
+        system_prompt=(
+            "You are the ticket-counter routine specialist. Answer only from the documented "
+            "counter workflow. Cover check-in, reservations, ticket changes, destination entry "
+            "requirements, codeshares, seat assignment, flight loads, checked baggage, fees, "
+            "and rebooking. Note that cross-trained outstation agents may also work at the gate. "
+            "Do not invent airline-specific rules or system commands."
+        ),
+    ),
     "boarding_documents": SpecialistDefinition(
         key="boarding_documents",
         label="Boarding & Documents",

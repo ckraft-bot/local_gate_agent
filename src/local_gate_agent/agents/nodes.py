@@ -24,6 +24,40 @@ def _build_llm(settings: Settings) -> ChatOllama:
 def _keyword_route_fallback(query: str) -> List[str]:
     q = query.lower()
     routes = []
+    if any(
+        k in q
+        for k in [
+            "ticket counter",
+            "check-in",
+            "check in",
+            "baggage tag",
+            "baggage receipt",
+            "ticket change",
+            "amend reservation",
+            "codeshare",
+            "destination requirement",
+            "entry requirement",
+            "outstation",
+        ]
+    ):
+        routes.append("routine_at_counter")
+    if any(
+        k in q
+        for k in [
+            "gate routine",
+            "open gate",
+            "boarding groups",
+            "jet bridge",
+            "jetbridge",
+            "crew check-in",
+            "crew check in",
+            "load closeout",
+            "load-closeout",
+            "standby",
+            "gate upgrade",
+        ]
+    ):
+        routes.append("routine_at_gate")
     if any(k in q for k in ["wheelchair", "service animal", "disability", "accommodation"]):
         routes.append("special_assistance")
     if any(k in q for k in ["cancel", "delay", "rebook", "weather", "irops"]):

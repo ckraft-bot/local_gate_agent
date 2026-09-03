@@ -28,6 +28,7 @@ local_gate_agent/
 			tools.py
 		ingestion/
 			docling_ingest.py
+			markdown_ingest.py
 			source_registry.py
 			web_ingest.py
 		retrieval/
@@ -45,7 +46,7 @@ local_gate_agent/
 
 ## Sources
 
-PDF ingestion first scans `data/sources/`. If that directory has no PDFs, it falls back to PDF files in the repository root.
+Ingestion scans `data/sources/` for PDFs and Markdown files. If it has no local sources, it falls back to PDF files in the repository root.
 
 Current PDFs in `data/sources/`:
 - `airport_codes.pdf`
@@ -60,6 +61,12 @@ Current PDFs in `data/sources/`:
 - `IATA_code_list.pdf`
 
 Known PDFs are mapped in `source_registry.py` to procedure categories and metadata fields. Unmapped PDFs use the default boarding-documents metadata.
+
+Routine Markdown sources have dedicated, source-bound specialists:
+- `routine_at_gate.md` is used only by the Gate Routine specialist.
+- `routine_at_counter.md` is used only by the Ticket Counter Routine specialist.
+
+Run ingestion after creating or changing either routine file so its updated content is available to the matching specialist.
 
 FlightAware is also supported as an opt-in public web source. It fetches only the public homepage at `https://www.flightaware.com/`, extracts readable page text, and stores the source URL with each chunk. It is a point-in-time snapshot after ingestion, not a live operational flight-status integration.
 
@@ -91,7 +98,7 @@ ollama pull qwen2.5:7b-instruct
 ollama pull nomic-embed-text
 ```
 
-5. Ingest PDFs:
+5. Ingest local PDFs and Markdown sources:
 
 ```powershell
 python scripts/ingest_docs.py
@@ -115,7 +122,7 @@ streamlit run src/local_gate_agent/ui/streamlit_app.py
 - Chunk IDs are deterministic so re-ingesting updates chunks instead of blind duplication.
 - FlightAware ingestion fetches only `https://www.flightaware.com/`; re-run it to refresh the stored snapshot. Observe FlightAware's terms and access limits.
 - The graph supports self-check retries via `SELF_CHECK_MAX_RETRIES`.
-- To ingest a specific path:
+- To ingest a specific PDF, Markdown file, or directory:
 
 ```powershell
 python scripts/ingest_docs.py --source path/to/file-or-folder
