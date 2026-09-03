@@ -64,3 +64,15 @@ def infer_metadata_for_source(path: Path) -> Dict[str, str]:
     }
     override = FILE_METADATA_OVERRIDES.get(filename, {})
     return {**base, **override}
+
+
+def flightaware_metadata() -> Dict[str, str]:
+    return {
+        "procedure_category": "irops",
+        "source_type": "public_web",
+        "confidentiality": "public",
+        "effective_date": "live",
+        "version": "live",
+        "station": "default",
+        "airline": "default",
+    }
